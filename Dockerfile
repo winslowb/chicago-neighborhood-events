@@ -7,7 +7,8 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy site content
-COPY index.html /usr/share/nginx/html/index.html
+COPY index.html /usr/share/nginx/html/
+RUN chmod 644 /usr/share/nginx/html/index.html
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
