@@ -294,7 +294,7 @@ function init() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
     maxZoom: 19,
   }).addTo(map);
-  markerLayer = L.layerGroup().addTo(map);
+  markerLayer = L.featureGroup().addTo(map);
 
   // Home marker
   L.circleMarker([CONFIG.lat, CONFIG.lon], {
