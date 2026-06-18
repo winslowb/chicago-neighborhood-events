@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
 <style>
 /* ═══════════════════════════════════════
    Design System
@@ -56,6 +57,25 @@
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Space Grotesk', 'Inter', sans-serif;
 }
+
+/* ── Lucide Icons ──────────────────────────── */
+.lucide {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.icon-xxs { width: 12px; height: 12px; }
+.icon-xs  { width: 14px; height: 14px; }
+.icon-sm  { width: 16px; height: 16px; }
+.icon-md  { width: 20px; height: 20px; }
+.icon-lg  { width: 28px; height: 28px; }
+.icon-xl  { width: 40px; height: 40px; }
+.icon-accent { color: var(--accent); }
+.icon-muted { color: var(--text-muted); }
+.icon-inline { display: inline; vertical-align: middle; }
 
 *,
 *::before,
@@ -921,14 +941,14 @@ footer a:hover { opacity: 0.8; text-decoration: underline; }
   <!-- ═══ HEADER ═══ -->
   <header role="banner">
     <h1>
-      <span class="logo-icon" aria-hidden="true">📍</span>
+      <span class="logo-icon" aria-hidden="true"><i data-lucide="map-pin" class="icon-lg" style="color:var(--accent)"></i></span>
       South Loop Events &amp; Closures
       <small>Chicago, IL</small>
     </h1>
     <div class="stats" id="stats" role="status" aria-live="polite">
-      <div class="stat">📅 <strong id="statDays">—</strong> <span class="sr-only">day window</span><span aria-hidden="true">days</span></div>
-      <div class="stat">📍 <strong id="statEvents" class="stat-green">—</strong> <span class="sr-only">events</span><span aria-hidden="true">events</span></div>
-      <div class="stat">🚧 <strong id="statClosures" class="stat-red">—</strong> <span class="sr-only">closures</span><span aria-hidden="true">closures</span></div>
+      <div class="stat"><i data-lucide="calendar-days" class="icon-xxs icon-muted icon-inline"></i> <strong id="statDays">—</strong> <span class="sr-only">day window</span><span aria-hidden="true">days</span></div>
+      <div class="stat"><i data-lucide="map-pin" class="icon-xxs icon-muted icon-inline"></i> <strong id="statEvents" class="stat-green">—</strong> <span class="sr-only">events</span><span aria-hidden="true">events</span></div>
+      <div class="stat"><i data-lucide="triangle-alert" class="icon-xxs icon-muted icon-inline"></i> <strong id="statClosures" class="stat-red">—</strong> <span class="sr-only">closures</span><span aria-hidden="true">closures</span></div>
     </div>
   </header>
 
@@ -947,7 +967,7 @@ footer a:hover { opacity: 0.8; text-decoration: underline; }
     </div>
 
     <div class="control-group">
-      <button class="btn btn-primary" id="btnGo" aria-label="Search events">🔍 Search</button>
+      <button class="btn btn-primary" id="btnGo" aria-label="Search events"><i data-lucide="search" class="icon-sm" style="margin-right:4px"></i> Search</button>
       <button class="btn btn-secondary" id="btnToday">Today</button>
       <button class="btn btn-secondary" id="btnWeek">+1 Week</button>
       <button class="btn btn-secondary" id="btnMonth">+1 Month</button>
@@ -956,7 +976,7 @@ footer a:hover { opacity: 0.8; text-decoration: underline; }
     <span class="separator" aria-hidden="true"></span>
 
     <div class="search-wrap">
-      <span class="search-icon" aria-hidden="true">🔍</span>
+      <span class="search-icon" aria-hidden="true"><i data-lucide="search" class="icon-sm icon-muted"></i></span>
       <input type="search" id="searchInput" placeholder="Search events..." aria-label="Search events by title, description, or address">
     </div>
 
@@ -1035,14 +1055,25 @@ const COLORS = {
 };
 
 const CATEGORY_LABELS = {
-  festival: "🎪 Festival",
-  athletic: "🏃 Athletic",
-  street_closure: "🚧 Street Closure",
-  filming: "🎬 Filming",
-  block_party: "🎉 Block Party",
-  community: "👥 Community",
-  commercial: "🛒 Commercial",
-  construction: "🔧 Construction",
+  festival: "Festival",
+  athletic: "Athletic",
+  street_closure: "Street Closure",
+  filming: "Filming",
+  block_party: "Block Party",
+  community: "Community",
+  commercial: "Commercial",
+  construction: "Construction",
+};
+
+const CATEGORY_ICONS = {
+  festival: "tent",
+  athletic: "running",
+  street_closure: "triangle-alert",
+  filming: "clapperboard",
+  block_party: "party-popper",
+  community: "users",
+  commercial: "shopping-cart",
+  construction: "wrench",
 };
 
 // ── State ──────────────────────────────────────
@@ -1140,6 +1171,10 @@ function getCategoryLabel(category) {
   return CATEGORY_LABELS[category] || category.replace(/_/g, " ");
 }
 
+function getCategoryIcon(category) {
+  return CATEGORY_ICONS[category] || "circle";
+}
+
 function escHtml(s) {
   return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
@@ -1203,6 +1238,7 @@ async function fetchData(silent = false) {
     activeCategories = new Set(cats);
 
     render();
+    if (typeof lucide !== "undefined") lucide.createIcons();
     if (!silent) hideLoading();
   } catch (err) {
     console.error("Fetch error:", err);
@@ -1290,6 +1326,7 @@ function render() {
   renderStats();
   renderFilters();
   renderLegend();
+  lucide.createIcons();
 }
 
 function renderFiltered() {
@@ -1356,6 +1393,7 @@ function renderFilters() {
             onkeydown="if(event.key==='Enter'||event.key===' ')event.preventDefault();toggleCategory('${c}')"
             style="border-color:${getColor(c)};${activeCategories.has(c) ? '' : `color:${getColor(c)}`}"
             aria-pressed="${activeCategories.has(c)}">
+        <i data-lucide="${getCategoryIcon(c)}" class="icon-xs"></i>
         ${getCategoryLabel(c)}
         <span class="count">${counts[c] || 0}</span>
       </span>
@@ -1386,6 +1424,7 @@ function renderLegend() {
     ${cats.map(c => `
       <span class="legend-item">
         <span class="legend-dot" style="background:${getColor(c)}"></span>
+        <i data-lucide="${getCategoryIcon(c)}" class="icon-xs icon-muted"></i>
         ${getCategoryLabel(c)}
       </span>
     `).join("")}
@@ -1413,7 +1452,7 @@ function renderMap() {
       <div style="max-width:280px">
         <strong>${escHtml(e.title)}</strong><br>
         <span class="popup-meta">${days}</span><br>
-        ${e.address ? `<span class="popup-addr">📍 ${escHtml(e.address)}</span><br>` : ""}
+        ${e.address ? `<span class="popup-addr"><i data-lucide="map-pin" class="icon-xxs icon-inline"></i> ${escHtml(e.address)}</span><br>` : ""}
         <span class="popup-desc">${escHtml(e.description.substring(0, 120))}</span>${closureBadge}
       </div>
     `);
@@ -1438,7 +1477,7 @@ function renderList() {
     const searchTerm = document.getElementById("searchInput").value.trim();
     container.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon" aria-hidden="true">${searchTerm ? "🔍" : "📭"}</div>
+        <div class="empty-icon" aria-hidden="true"><i data-lucide="${searchTerm ? 'search' : 'inbox'}" class="icon-xl icon-muted"></i></div>
         <h3>${searchTerm ? "No matching events" : "No events found"}</h3>
         <p>${searchTerm ? "Try a different search term or adjust your filters." : "Try expanding your date range or search area."}</p>
       </div>`;
@@ -1450,14 +1489,14 @@ function renderList() {
 
   container.innerHTML = filteredEvents.map((e, i) => {
     const days = e.dateStart === e.dateEnd
-      ? `<span>📅 ${e.dateStart}</span>`
-      : `<span>📅 ${e.dateStart} → ${e.dateEnd}</span>`;
+      ? `<span><i data-lucide="calendar" class="icon-xxs icon-muted icon-inline"></i> ${e.dateStart}</span>`
+      : `<span><i data-lucide="calendar" class="icon-xxs icon-muted icon-inline"></i> ${e.dateStart} → ${e.dateEnd}</span>`;
 
     const closureTag = e.closureType
       ? `<span class="badge" style="background:${e.color}20;color:${e.color};border:1px solid ${e.color}40">${e.closureType}</span>`
       : "";
 
-    const wardTag = e.ward ? `<span>🏛️ Ward ${e.ward}</span>` : "";
+    const wardTag = e.ward ? `<span><i data-lucide="landmark" class="icon-xxs icon-muted icon-inline"></i> Ward ${e.ward}</span>` : "";
     const sourceTag = `<span class="badge-source">${e.sourceLabel || e.source}</span>`;
 
     return `
@@ -1472,7 +1511,7 @@ function renderList() {
           <div class="title">${escHtml(e.title.substring(0, 120))}</div>
           <div class="meta">
             ${days}
-            ${e.address ? `<span>📍 ${escHtml(e.address.substring(0, 50))}</span>` : ""}
+            ${e.address ? `<span><i data-lucide="map-pin" class="icon-xxs icon-muted icon-inline"></i> ${escHtml(e.address.substring(0, 50))}</span>` : ""}
             ${closureTag}
             ${wardTag}
             ${sourceTag}
@@ -1531,7 +1570,7 @@ function openModal(e) {
         `).join("")}
       </div>
       <div class="modal-actions">
-        <button class="btn btn-primary" onclick="closeModal();panTo(${e.lat}, ${e.lon})">📍 Show on map</button>
+        <button class="btn btn-primary" onclick="closeModal();panTo(${e.lat}, ${e.lon})"><i data-lucide="map-pin" class="icon-sm" style="margin-right:4px"></i> Show on map</button>
         <button class="btn btn-secondary" onclick="closeModal()">Close</button>
       </div>
     </div>
