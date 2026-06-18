@@ -1,3 +1,17 @@
+# ─── CI/CD Pipeline for Chicago Neighborhood Events ──────────────────
+#
+# Trigger: push to main
+# Jobs:    build → deploy
+#
+# Deployment uses a GitHub self-hosted runner installed on pihole.lan with
+# labels: self-hosted, pihole, neighborhood. The runner has direct Docker
+# access and can manage the compose stack locally.
+#
+# Image registry:
+#   ghcr.io/winslowb/chicago-neighborhood-events:*  (git sha + latest)
+#   Auth uses the repository-scoped GITHUB_TOKEN.
+# ─────────────────────────────────────────────────────────────────────
+
 name: Build & Deploy
 
 on:
@@ -6,37 +20,38 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: winslowb/chicago-neighborhood-events
+  CONTAINER_NAME: chicago-events
+  COMPOSE_DIR: /home/bill/.docker/chicago-neighborhood-events
+  HOST_PORT: 3008
 
 jobs:
-  build-and-deploy:
+  build:
+    name: Build & Push Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Extract metadata
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ghcr.io/${{ github.repository }}
           tags: |
-            type=sha,prefix=
-            type=raw,value=latest,enable=true
+            type=sha
+            type=raw,value=latest
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -48,14 +63,52 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy to pihole.lan
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: 192.168.0.19
-          username: bill
-          key: ${{ secrets.PIHOLE_SSH_KEY }}
-          script: |
-            cd /home/bill/.docker/chicago-neighborhood-events
-            docker compose pull
-            docker compose up -d --force-recreate
-            echo "✅ chicago-events deployed — SHA: ${{ github.sha }}"
+  deploy:
+    name: Deploy to pihole.lan
+    needs: build
+    runs-on: [self-hosted, pihole, neighborhood]
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+      GHCR_USERNAME: ${{ github.actor }}
+      GHCR_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy with docker compose
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Deploy starting on $(hostname) ==="
+          echo "Image: ${IMAGE}:latest"
+
+          printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+          mkdir -p "${COMPOSE_DIR}"
+          cp docker-compose.yml "${COMPOSE_DIR}/docker-compose.yml"
+
+          cd "${COMPOSE_DIR}"
+          docker compose pull
+          docker compose up -d --force-recreate
+
+          echo "=== Health check ==="
+          HEALTHY=false
+          for i in $(seq 1 15); do
+            if curl -fsS "http://localhost:${HOST_PORT}/" >/dev/null 2>&1; then
+              echo "OK on attempt ${i}"
+              HEALTHY=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${HEALTHY}" != "true" ]; then
+            echo "Failed health check!"
+            docker logs --tail 50 "${CONTAINER_NAME}" || true
+            exit 1
+          fi
+
+          echo "Deployed ${IMAGE}:latest (sha ${{ github.sha }})"
