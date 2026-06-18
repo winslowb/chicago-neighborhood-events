@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>South Loop Events &amp; Closures</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --card: #16213e;
+    --card-hover: #1c2a4a;
+    --accent: #df840c;
+    --text: #e0e0e0;
+    --text-muted: #8892a0;
+    --border: #2a2a4a;
+    --green: #2ecc71;
+    --blue: #3498db;
+    --orange: #e67e22;
+    --red: #e74c3c;
+    --purple: #9b59b6;
+    --teal: #1abc9c;
+    --pink: #e84393;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+  /* Header */
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 16px 0;
+    border-bottom: 1px solid var(--border); margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 1.4rem; font-weight: 700; color: var(--accent);
+    display: flex; align-items: center; gap: 8px;
+  }
+  h1 small { font-size: 0.7rem; color: var(--text-muted); font-weight: 400; }
+  .stats {
+    display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem;
+  }
+  .stat {
+    background: var(--card); padding: 6px 14px; border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .stat strong { color: var(--accent); font-size: 1.1rem; }
+
+  /* Controls */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 12px 16px; background: var(--card); border-radius: 10px;
+    border: 1px solid var(--border); margin-bottom: 16px;
+  }
+  .controls label { font-size: 0.8rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px; }
+  .controls input[type="date"] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 6px; font-size: 0.9rem;
+  }
+  .controls button {
+    background: var(--accent); color: #fff; border: none;
+    padding: 8px 20px; border-radius: 6px; font-size: 0.9rem; font-weight: 600;
+    cursor: pointer; transition: opacity 0.2s;
+  }
+  .controls button:hover { opacity: 0.85; }
+  .controls button.secondary {
+    background: var(--border); color: var(--text);
+  }
+
+  /* Filter chips */
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+  }
+  .chip {
+    padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border); background: transparent;
+    color: var(--text-muted); transition: all 0.2s; user-select: none;
+  }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip:hover:not(.active) { border-color: var(--text-muted); }
+
+  /* Map */
+  #map {
+    height: 420px; border-radius: 10px; border: 1px solid var(--border);
+    margin-bottom: 16px; z-index: 1;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
+    font-size: 0.8rem;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot {
+    width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  /* Event list */
+  .event-list { display: flex; flex-direction: column; gap: 8px; }
+  .event-card {
+    display: flex; gap: 12px; padding: 12px 16px;
+    background: var(--card); border-radius: 10px; border: 1px solid var(--border);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .event-card:hover { background: var(--card-hover); border-color: var(--accent); }
+  .event-card .color-bar {
+    width: 4px; border-radius: 2px; flex-shrink: 0;
+  }
+  .event-card .body { flex: 1; min-width: 0; }
+  .event-card .title {
+    font-weight: 600; font-size: 0.95rem; margin-bottom: 2px;
+  }
+  .event-card .meta {
+    font-size: 0.8rem; color: var(--text-muted);
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .event-card .meta span { white-space: nowrap; }
+  .event-card .desc {
+    font-size: 0.85rem; color: var(--text); margin-top: 4px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .badge {
+    display: inline-block; font-size: 0.65rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 10px; text-transform: uppercase;
+    letter-spacing: 0.3px; white-space: nowrap;
+  }
+  .chip-category { display: inline-block; }
+
+  /* Loading */
+  .loading {
+    text-align: center; padding: 40px 20px; color: var(--text-muted);
+  }
+  .spinner {
+    display: inline-block; width: 32px; height: 32px; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite; margin-bottom: 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .empty {
+    text-align: center; padding: 40px 20px; color: var(--text-muted);
+  }
+  .empty h3 { color: var(--accent); margin-bottom: 6px; }
+
+  .error-msg {
+    background: rgba(231,76,60,0.15); border: 1px solid var(--red);
+    padding: 16px; border-radius: 10px; margin-bottom: 12px; text-align: center;
+  }
+
+  footer {
+    text-align: center; padding: 20px 0; font-size: 0.75rem;
+    color: var(--text-muted); border-top: 1px solid var(--border); margin-top: 24px;
+  }
+  footer a { color: var(--accent); }
+
+  .leaflet-popup-content-wrapper { background: var(--card) !important; color: var(--text) !important; }
+  .leaflet-popup-tip { background: var(--card) !important; }
+  .leaflet-popup-content { margin: 10px 14px !important; font-size: 0.85rem !important; }
+  .leaflet-popup-content strong { color: var(--accent); }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.1rem; }
+    .controls { flex-direction: column; align-items: stretch; }
+    .controls label { width: 100%; }
+    #map { height: 300px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>
+      📍 South Loop Events &amp; Closures
+      <small>Chicago, IL</small>
+    </h1>
+    <div class="stats" id="stats">
+      <div class="stat">📅 <strong id="statDays">—</strong> day window</div>
+      <div class="stat">📍 <strong id="statEvents">—</strong> events</div>
+      <div class="stat">🚧 <strong id="statClosures">—</strong> closures</div>
+    </div>
+  </header>
+
+  <!-- Controls -->
+  <div class="controls">
+    <label>From
+      <input type="date" id="dateFrom">
+    </label>
+    <label>To
+      <input type="date" id="dateTo">
+    </label>
+    <button id="btnGo">🔍 Search</button>
+    <button class="secondary" id="btnToday">Today</button>
+    <button class="secondary" id="btnWeek">+1 Week</button>
+    <button class="secondary" id="btnMonth">+1 Month</button>
+    <span style="flex:1"></span>
+    <label style="flex-direction:row;align-items:center;gap:6px">
+      <input type="checkbox" id="chkAutoRefresh" checked>
+      <span style="font-size:0.8rem">Auto-refresh</span>
+    </label>
+  </div>
+
+  <!-- Category filters -->
+  <div class="filters" id="filters"></div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Legend -->
+  <div class="legend" id="legend"></div>
+
+  <!-- Event list -->
+  <div id="eventList"></div>
+
+  <footer>
+    Data from <a href="https://data.cityofchicago.org/" target="_blank">City of Chicago Data Portal</a> |
+    <a href="https://data.cityofchicago.org/d/jdis-5sry" target="_blank">Transport Permits</a> &amp;
+    <a href="https://data.cityofchicago.org/d/xgse-8eg7" target="_blank">Special Events</a> |
+    <a href="https://github.com/winslowb/chicago-neighborhood-events" target="_blank">GitHub</a>
+  </footer>
+</div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────
+const CONFIG = {
+  lat: 41.872,
+  lon: -87.625,
+  zoom: 15,
+  radiusMiles: 1.0,
+  defaultDays: 14,
+  permitsId: "jdis-5sry",
+  eventsId: "xgse-8eg7",
+  sodaBase: "https://data.cityofchicago.org/resource",
+};
+
+// ponytail: only 8 base categories; fallback `||` in getColor handles the rest
+const COLORS = {
+  festival: "#e67e22", athletic: "#2ecc71", street_closure: "#e74c3c",
+  filming: "#9b59b6", block_party: "#e84393", community: "#1abc9c",
+  commercial: "#3498db", construction: "#f1c40f",
+};
+
+const CATEGORY_LABELS = {
+  festival: "🎪 Festival",
+  athletic: "🏃 Athletic",
+  street_closure: "🚧 Street Closure",
+  filming: "🎬 Filming",
+  block_party: "🎉 Block Party",
+  community: "👥 Community",
+  commercial: "🛒 Commercial",
+  construction: "🔧 Construction",
+};
+
+// ── State ──────────────────────────────────────────────────────────
+let map, markerLayer, allEvents = [], filteredEvents = [];
+let activeCategories = new Set();
+
+// ── Init ───────────────────────────────────────────────────────────
+function init() {
+  // Set default dates
+  const today = new Date();
+  const twoWeeks = new Date(today);
+  twoWeeks.setDate(twoWeeks.getDate() + CONFIG.defaultDays);
+  document.getElementById("dateFrom").value = fmtDate(today);
+  document.getElementById("dateTo").value = fmtDate(twoWeeks);
+
+  // Init map
+  map = L.map("map", { zoomControl: true }).setView([CONFIG.lat, CONFIG.lon], CONFIG.zoom);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19,
+  }).addTo(map);
+  markerLayer = L.featureGroup().addTo(map);
+
+  // Home marker
+  L.circleMarker([CONFIG.lat, CONFIG.lon], {
+    radius: 10, color: "#df840c", fillColor: "#df840c",
+    fillOpacity: 0.7, weight: 2,
+  }).addTo(map).bindTooltip("910 S Michigan Ave", {permanent: false, direction: "top"});
+
+  // Search radius circle
+  L.circle([CONFIG.lat, CONFIG.lon], {
+    radius: CONFIG.radiusMiles * 1609.34,
+    color: "#df840c",
+    fillColor: "#df840c",
+    fillOpacity: 0.05,
+    weight: 1,
+    dashArray: "5, 10",
+  }).addTo(map);
+
+  // Button presets — one helper
+  const setDays = (n) => {
+    const t = new Date();
+    document.getElementById("dateFrom").value = fmtDate(t);
+    const e = new Date(t); e.setDate(e.getDate() + n);
+    document.getElementById("dateTo").value = fmtDate(e);
+    fetchData();
+  };
+  document.getElementById("btnToday").addEventListener("click", () => setDays(0));
+  document.getElementById("btnWeek").addEventListener("click", () => setDays(7));
+  document.getElementById("btnMonth").addEventListener("click", () => setDays(30));
+  document.getElementById("btnGo").addEventListener("click", fetchData);
+
+  // Auto-refresh every 5 minutes
+  setInterval(() => {
+    if (document.getElementById("chkAutoRefresh").checked) {
+      fetchData(true);
+    }
+  }, 5 * 60 * 1000);
+
+  // Initial load
+  fetchData();
+}
+
+function fmtDate(d) {
+  return d.toISOString().split("T")[0];
+}
+
+// ── Category Colors ────────────────────────────────────────────────
+function getColor(category) {
+  return COLORS[category] || "#95a5a6";
+}
+
+function getCategoryLabel(category) {
+  return CATEGORY_LABELS[category] || category.replace(/_/g, " ");
+}
+
+// ── Fetch Data ─────────────────────────────────────────────────────
+async function fetchData(silent = false) {
+  const from = document.getElementById("dateFrom").value;
+  const to = document.getElementById("dateTo").value;
+  const lat = CONFIG.lat;
+  const lon = CONFIG.lon;
+  const radius = CONFIG.radiusMiles;
+
+  if (!silent) showLoading("Fetching data from Chicago Data Portal...");
+
+  try {
+    // 1) Fetch Transport Permits
+    const latR = radius / 69.0;
+    const lonR = radius / (69.0 * Math.cos(lat * Math.PI / 180) || 1);
+    const latMin = lat - latR, latMax = lat + latR;
+    const lonMin = lon - lonR, lonMax = lon + lonR;
+
+    const permitUrl = `${CONFIG.sodaBase}/${CONFIG.permitsId}.json`
+      + `?$where=(applicationtype='DOT_SE'`
+      + ` AND applicationstartdate <= '${to}T23:59:59'`
+      + ` AND applicationenddate >= '${from}T00:00:00'`
+      + ` AND latitude between ${latMin} and ${latMax}`
+      + ` AND longitude between ${lonMin} and ${lonMax}`
+      + `) OR (applicationtype='DOT_OCC'`
+      + ` AND worktype in ('StClosure','Festival','Parade','Filming','BlockParty','Assembly','Athletic','FarmMkt','SideSale','PublicPlac','Peoples')`
+      + ` AND applicationstartdate >= '${from}T00:00:00'`
+      + ` AND applicationstartdate <= '${to}T23:59:59'`
+      + ` AND latitude between ${latMin} and ${latMax}`
+      + ` AND longitude between ${lonMin} and ${lonMax}`
+      + `) OR (applicationtype != 'DOT_SE' AND applicationtype != 'DOT_OCC'`
+      + ` AND applicationstartdate >= '${from}T00:00:00'`
+      + ` AND applicationstartdate <= '${to}T23:59:59'`
+      + ` AND latitude between ${latMin} and ${latMax}`
+      + ` AND longitude between ${lonMin} and ${lonMax}`
+      + `)&$order=applicationstartdate ASC&$limit=500`;
+
+    const [permitsRaw, eventsRaw] = await Promise.all([
+      fetch(permitUrl).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      // 2) Fetch Special Events
+      fetch(`${CONFIG.sodaBase}/${CONFIG.eventsId}.json`
+        + `?$where=date >= '${from}' AND date <= '${to}'`
+        + `&$order=date ASC&$limit=200`)
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+    ]);
+
+    // Normalize permits
+    const permits = (permitsRaw || []).map(normalizePermit);
+
+    // Normalize + bbox filter events
+    let events = (eventsRaw || []).map(normalizeEvent);
+    events = events.filter(e => {
+      if (!e.lat || !e.lon) return false;
+      return e.lat >= latMin && e.lat <= latMax && e.lon >= lonMin && e.lon <= lonMax;
+    });
+
+    allEvents = [...permits, ...events];
+    allEvents.sort((a, b) => (a.dateStart || "9999-12-31").localeCompare(b.dateStart || "9999-12-31"));
+
+    // Activate all categories
+    const cats = new Set(allEvents.map(e => e.category));
+    activeCategories = new Set(cats);
+
+    render();
+    if (!silent) hideLoading();
+  } catch (err) {
+    console.error("Fetch error:", err);
+    document.getElementById("eventList").innerHTML = `
+      <div class="error-msg">
+        <strong>⚠️ Failed to load data</strong><br>
+        ${err.message}<br><br>
+        <button onclick="fetchData()" style="background:var(--accent);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer">Retry</button>
+      </div>`;
+    if (!silent) hideLoading();
+  }
+}
+
+// ── Normalizers ────────────────────────────────────────────────────
+function normalizePermit(p) {
+  const start = (p.applicationstartdate || "").substring(0, 10);
+  const end = (p.applicationenddate || "").substring(0, 10);
+
+  const addr = [p.streetnumberfrom, p.direction, p.streetname, p.suffix]
+    .filter(Boolean).join(" ").trim();
+
+  const comments = p.comments || "";
+  const wt = p.worktype || "";
+  const at = p.applicationtype || "";
+
+  let category = "construction";
+  if (["Festival","Parade"].includes(wt)) category = "festival";
+  else if (wt === "Athletic") category = "athletic";
+  else if (wt === "StClosure") category = "street_closure";
+  else if (wt === "Filming") category = "filming";
+  else if (wt === "BlockParty") category = "block_party";
+  else if (["Assembly","Peoples"].includes(wt)) category = "community";
+  else if (["FarmMkt","SideSale","PublicPlac"].includes(wt)) category = "commercial";
+  else if (at === "DOT_SE") category = "festival";
+
+  return {
+    id: p.uniquekey || Math.random().toString(36),
+    source: "transport_permit",
+    title: p.applicationname || comments.substring(0, 60) || addr,
+    description: comments || p.worktypedescription || "",
+    category,
+    dateStart: start,
+    dateEnd: end,
+    address: addr,
+    closureType: p.streetclosure || "",
+    ward: "",
+    lat: parseFloat(p.latitude) || 0,
+    lon: parseFloat(p.longitude) || 0,
+    permitType: p.applicationdescription || "",
+    workType: p.worktypedescription || "",
+    status: p.applicationstatus || "",
+    color: getColor(category),
+  };
+}
+
+function normalizeEvent(e) {
+  const loc = e.location || {};
+  const coords = loc.coordinates || [0, 0];
+  const lon = coords[0] || 0, lat = coords[1] || 0;
+  const cat = (e.event_type || "").toLowerCase().replace(/\s+/g, "_");
+
+  return {
+    id: e.event_details + e.date || Math.random().toString(36),
+    source: "special_event",
+    title: e.event_details || "",
+    description: `${e.event_type || ""} at ${e.venue || ""}`,
+    category: cat,
+    dateStart: (e.date || "").substring(0, 10),
+    dateEnd: (e.date || "").substring(0, 10),
+    address: e.venue_address || "",
+    closureType: ["Parade","Festival","Marathon"].includes(e.event_type) ? "Full" : "Partial",
+    ward: e.ward || "",
+    lat,
+    lon,
+    permitType: "Special Event",
+    workType: e.event_type || "",
+    status: "Scheduled",
+    color: getColor(cat),
+  };
+}
+
+// ── Render ─────────────────────────────────────────────────────────
+function render() {
+  filteredEvents = allEvents.filter(e => activeCategories.has(e.category));
+
+  renderStats();
+  renderFilters();
+  renderLegend();
+  renderMap();
+  renderList();
+}
+
+function renderStats() {
+  const from = document.getElementById("dateFrom").value;
+  const to = document.getElementById("dateTo").value;
+  const days = Math.round((new Date(to) - new Date(from)) / (24*60*60*1000)) + 1;
+  const closures = filteredEvents.filter(e => e.closureType === "Full").length;
+  document.getElementById("statDays").textContent = days;
+  document.getElementById("statEvents").textContent = filteredEvents.length;
+  document.getElementById("statClosures").textContent = closures;
+}
+
+function renderFilters() {
+  const cats = [...new Set(allEvents.map(e => e.category))];
+  const container = document.getElementById("filters");
+  container.innerHTML = `
+    <span class="chip ${activeCategories.size === cats.length ? 'active' : ''}"
+          onclick="toggleAllCategories()" style="margin-right:4px">All</span>
+    ${cats.map(c => `
+      <span class="chip ${activeCategories.has(c) ? 'active' : ''}"
+            data-cat="${c}"
+            onclick="toggleCategory('${c}')"
+            style="border-color:${getColor(c)};color:${activeCategories.has(c) ? '#fff' : getColor(c)}">
+        ${getCategoryLabel(c)}
+      </span>
+    `).join("")}
+  `;
+}
+
+function toggleAllCategories() {
+  const cats = [...new Set(allEvents.map(e => e.category))];
+  if (activeCategories.size === cats.length) {
+    activeCategories = new Set();
+  } else {
+    activeCategories = new Set(cats);
+  }
+  render();
+}
+
+function toggleCategory(cat) {
+  if (activeCategories.has(cat)) {
+    activeCategories.delete(cat);
+  } else {
+    activeCategories.add(cat);
+  }
+  render();
+}
+
+function renderLegend() {
+  const cats = [...new Set(allEvents.filter(e => activeCategories.has(e.category)).map(e => e.category))];
+  document.getElementById("legend").innerHTML = cats.map(c => `
+    <span class="legend-item">
+      <span class="legend-dot" style="background:${getColor(c)}"></span>
+      ${getCategoryLabel(c)}
+    </span>
+  `).join("");
+}
+
+function renderMap() {
+  markerLayer.clearLayers();
+
+  filteredEvents.forEach(e => {
+    if (!e.lat || !e.lon) return;
+
+    const color = e.color || getColor(e.category);
+    const radius = e.closureType === "Full" ? 12 : e.closureType === "Curblane" || e.closureType === "Partial" ? 8 : 6;
+
+    const marker = L.circleMarker([e.lat, e.lon], {
+      radius,
+      color,
+      fillColor: color,
+      fillOpacity: 0.7,
+      weight: 2,
+      opacity: 0.9,
+    });
+
+    const days = e.dateStart === e.dateEnd
+      ? e.dateStart
+      : `${e.dateStart} → ${e.dateEnd}`;
+
+    const closureBadge = e.closureType
+      ? `<br><span style="font-size:0.75rem;color:${color}">${e.closureType} closure</span>`
+      : "";
+
+    marker.bindPopup(`
+      <div style="max-width:280px">
+        <strong>${escHtml(e.title)}</strong><br>
+        <span style="font-size:0.8rem;color:#8892a0">${days}</span><br>
+        ${e.address ? `<span style="font-size:0.8rem">📍 ${escHtml(e.address)}</span><br>` : ""}
+        <span style="font-size:0.75rem;color:#8892a0">${escHtml(e.description.substring(0, 120))}</span>${closureBadge}
+      </div>
+    `);
+
+    markerLayer.addLayer(marker);
+  });
+
+  // Fit bounds to markers
+  if (filteredEvents.length > 0) {
+    const bounds = markerLayer.getBounds();
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: CONFIG.zoom });
+    }
+  }
+}
+
+function renderList() {
+  const container = document.getElementById("eventList");
+
+  if (filteredEvents.length === 0) {
+    container.innerHTML = `<div class="empty">
+      <h3>No events found</h3>
+      <p>Try expanding your date range or search area.</p>
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = filteredEvents.map(e => {
+    const days = e.dateStart === e.dateEnd
+      ? `<span>📅 ${e.dateStart}</span>`
+      : `<span>📅 ${e.dateStart} → ${e.dateEnd}</span>`;
+    const closureTag = e.closureType
+      ? `<span class="badge" style="background:${e.color}20;color:${e.color};border:1px solid ${e.color}40">${e.closureType}</span>`
+      : "";
+    const wardTag = e.ward ? `<span>🏛️ Ward ${e.ward}</span>` : "";
+
+    return `
+      <div class="event-card" onclick="panTo(${e.lat}, ${e.lon})">
+        <div class="color-bar" style="background:${e.color}"></div>
+        <div class="body">
+          <div class="title">${escHtml(e.title.substring(0, 120))}</div>
+          <div class="meta">
+            ${days}
+            ${e.address ? `<span>📍 ${escHtml(e.address.substring(0, 50))}</span>` : ""}
+            ${closureTag}
+            ${wardTag}
+          </div>
+          ${e.description ? `<div class="desc">${escHtml(e.description.substring(0, 200))}</div>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function panTo(lat, lon) {
+  if (lat && lon) {
+    map.setView([lat, lon], 16, { animate: true });
+  }
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+function showLoading(msg) {
+  document.getElementById("eventList").innerHTML = `
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>${msg}</p>
+    </div>`;
+}
+
+function hideLoading() {
+  // no-op, render replaces content
+}
+
+function escHtml(s) {
+  return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Start ──────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

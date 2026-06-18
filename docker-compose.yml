@@ -1,0 +1,15 @@
+services:
+  chicago-events:
+    image: ghcr.io/winslowb/chicago-neighborhood-events:latest
+    container_name: chicago-events
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3008:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "org.label-schema.group=webapps"
