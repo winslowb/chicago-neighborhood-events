@@ -19,373 +19,189 @@ Usage:
   python fetch_events.py --pretty                    # Human-readable output
 """
 
-from __future__ import annotations
-
 import argparse
 import json
-import os
+import math
 import sys
 import urllib.request
 import urllib.parse
 from datetime import date, timedelta, datetime
 
-# ── Defaults ──────────────────────────────────────────────────────────
-DEFAULT_LAT = 41.872
-DEFAULT_LON = -87.625
-DEFAULT_RADIUS_MILES = 1.0
-DEFAULT_DAYS = 14
+LAT, LON, RADIUS, DAYS = 41.872, -87.625, 1.0, 14
+SODA = "https://data.cityofchicago.org/resource"
+PERMITS, EVENTS = "jdis-5sry", "xgse-8eg7"
 
-SODA_BASE = "https://data.cityofchicago.org/resource"
-
-# Dataset IDs
-PERMITS_ID = "jdis-5sry"   # Transportation Dept Permits - Street Closures
-EVENTS_ID  = "xgse-8eg7"    # Special Events (venue-based)
-
-# Interesting work types for the permits dataset
-# These are the ones that cause people/traffic disruption
-INTERESTING_WORK_TYPES = [
-    "StClosure",     # Street Closure
-    "Festival",      # Festival
-    "Parade",        # Parade
-    "Filming",       # Filming
-    "BlockParty",    # Block Party
-    "Assembly",      # Assembly
-    "Athletic",      # Athletic event (races, etc.)
-    "FarmMkt",       # Farmer's Market
-    "SideSale",      # Sidewalk Sale
-    "PublicPlac",    # Public Place Obstruction
-    "Peoples",       # Make Way for People Program
-]
-
-INTERESTING_APP_TYPES = [
-    "DOT_SE",        # Special Event Permit
-    "DOT_OCC",       # Occupy the Public ROW
+# ponytail: work types that cause people/traffic disruption
+INTERESTING_WTS = [
+    "StClosure", "Festival", "Parade", "Filming", "BlockParty",
+    "Assembly", "Athletic", "FarmMkt", "SideSale", "PublicPlac", "Peoples",
 ]
 
 
-def build_bbox(lat: float, lon: float, radius_miles: float) -> tuple[float, float, float, float]:
-    """
-    Build a bounding box around (lat, lon) of `radius_miles`.
-    Approximate: 1° lat ≈ 69 mi, 1° lon ≈ 69 * cos(lat) mi.
-    """
-    import math
-    lat_deg = radius_miles / 69.0
-    lon_deg = radius_miles / (69.0 * abs(math.cos(math.radians(lat))) or 1)
-    return (lat - lat_deg, lat + lat_deg, lon - lon_deg, lon + lon_deg)
+def build_bbox(lat: float, lon: float, radius_miles: float):
+    """Bounding box: 1° lat ≈ 69 mi, 1° lon ≈ 69*cos(lat) mi."""
+    d = radius_miles / 69.0
+    d2 = radius_miles / (69.0 * abs(math.cos(math.radians(lat))) or 1)
+    return (lat - d, lat + d, lon - d2, lon + d2)
 
 
-def soql(val) -> str:
-    """SODA-style quoting: wrap in single quotes."""
+def q(val):
+    """SODA single-quote wrapping."""
     return f"'{val}'"
 
 
-def _soda_query(dataset_id: str, params: dict, label: str = "data") -> list[dict]:
-    """Build and execute a SODA API query with proper URL encoding."""
-    base = f"{SODA_BASE}/{dataset_id}.json"
-    # Remove None values and encode params
-    clean_params = {k: v for k, v in params.items() if v is not None}
-    url = base + "?" + urllib.parse.urlencode(clean_params)
-    return _soda_get(url, label)
+def soda_get(dataset: str, params: dict, label="data"):
+    """Fetch JSON from SODA. Returns [] on error."""
+    url = f"{SODA}/{dataset}.json?" + urllib.parse.urlencode({k: v for k, v in params.items() if v})
+    req = urllib.request.Request(url, headers={"User-Agent": "ChiEvents/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.loads(r.read())
+            return d if isinstance(d, list) else []
+    except Exception as e:
+        print(f"soda {label}: {e}", file=sys.stderr)
+        return []
 
 
-def fetch_permits(
-    start_date: str,
-    end_date: str,
-    lat: float = DEFAULT_LAT,
-    lon: float = DEFAULT_LON,
-    radius_miles: float = DEFAULT_RADIUS_MILES,
-    limit: int = 500,
-) -> list[dict]:
-    """Fetch street closure permits near a location within a date range.
-    
-    Only returns permits that:
-    - Are special events (DOT_SE) — festivals, parades, athletic events
-    - Are street closures (StClosure work type)
-    - START within the date window (new/upcoming construction)
-    - Have been active for less than 60 days (recent ongoing work)
-    """
-    lat_min, lat_max, lon_min, lon_max = build_bbox(lat, lon, radius_miles)
+def fetch_permits(start, end, lat=LAT, lon=LON, radius=RADIUS, limit=500):
+    """Permits near (lat,lon) within date range. Events (DOT_SE) use date overlap;
+    everything else must START in the window to exclude ancient construction."""
+    lat_min, lat_max, lon_min, lon_max = build_bbox(lat, lon, radius)
+    wts = "','".join(INTERESTING_WTS)
 
-    from datetime import datetime, timedelta
-
-    # Special event permits — always show, they're short-duration events
-    clauses_se = [
-        f"applicationtype = 'DOT_SE'",
-        f"applicationstartdate <= {soql(end_date + 'T23:59:59')}",
-        f"applicationenddate >= {soql(start_date + 'T00:00:00')}",
-        f"latitude between {lat_min} and {lat_max}",
-        f"longitude between {lon_min} and {lon_max}",
-    ]
-
-    # Occupy ROW permits — only interesting work types that START in window
-    interesting_wts = "','".join(INTERESTING_WORK_TYPES)
-    clauses_occ = [
-        f"applicationtype = 'DOT_OCC'",
-        f"worktype in ('{interesting_wts}')",
-        f"applicationstartdate >= {soql(start_date + 'T00:00:00')}",
-        f"applicationstartdate <= {soql(end_date + 'T23:59:59')}",
-        f"latitude between {lat_min} and {lat_max}",
-        f"longitude between {lon_min} and {lon_max}",
-    ]
-
-    # Public Way Openings + other permits — only those starting within the window
-    clauses_pwo = [
-        f"applicationtype != 'DOT_SE'",
-        f"applicationtype != 'DOT_OCC'",
-        f"applicationstartdate >= {soql(start_date + 'T00:00:00')}",
-        f"applicationstartdate <= {soql(end_date + 'T23:59:59')}",
-        f"latitude between {lat_min} and {lat_max}",
-        f"longitude between {lon_min} and {lon_max}",
-    ]
+    def block(atype, date_filter, extra=None):
+        c = [f"applicationtype={q(atype)}"]
+        c += [f"applicationstartdate <= {q(end + 'T23:59:59')}"]
+        if date_filter == "overlap":
+            c += [f"applicationenddate >= {q(start + 'T00:00:00')}"]
+        else:
+            c += [f"applicationstartdate >= {q(start + 'T00:00:00')}"]
+            c += [f"applicationstartdate <= {q(end + 'T23:59:59')}"]
+        if extra:
+            c.append(extra)
+        c += [f"latitude between {lat_min} and {lat_max}"]
+        c += [f"longitude between {lon_min} and {lon_max}"]
+        return f"({' AND '.join(c)})"
 
     where = " OR ".join([
-        f"({' AND '.join(clauses_se)})",
-        f"({' AND '.join(clauses_occ)})",
-        f"({' AND '.join(clauses_pwo)})",
+        block("DOT_SE", "overlap"),
+        block("DOT_OCC", "start", f"worktype in ('{wts}')"),
+        f"(applicationtype NOT IN ('DOT_SE','DOT_OCC') AND applicationstartdate >= {q(start+'T00:00:00')} AND applicationstartdate <= {q(end+'T23:59:59')} AND latitude between {lat_min} and {lat_max} AND longitude between {lon_min} and {lon_max})",
     ])
 
-    params = {
-        "$where": where,
-        "$order": "applicationstartdate ASC",
-        "$limit": str(limit),
-    }
-    return _soda_query(PERMITS_ID, params, "permits")
+    return soda_get(PERMITS, {"$where": where, "$order": "applicationstartdate ASC", "$limit": str(limit)}, "permits")
 
 
-def fetch_special_events(
-    start_date: str,
-    end_date: str,
-    lat: float = DEFAULT_LAT,
-    lon: float = DEFAULT_LON,
-    radius_miles: float = DEFAULT_RADIUS_MILES,
-    limit: int = 200,
-) -> list[dict]:
-    """Fetch special events near a location within a date range."""
-    lat_min, lat_max, lon_min, lon_max = build_bbox(lat, lon, radius_miles)
-
-    clauses = [
-        f"date >= {soql(start_date)}",
-        f"date <= {soql(end_date)}",
-    ]
-
-    params = {
-        "$where": " AND ".join(clauses),
-        "$order": "date ASC",
-        "$limit": str(limit),
-    }
-    events = _soda_query(EVENTS_ID, params, "special events")
-
-    # Post-filter by bounding box since we can't do spatial in Special Events
-    filtered = []
-    for e in events:
-        loc = e.get("location")
-        if loc and isinstance(loc, dict):
-            coords = loc.get("coordinates")
-            if coords and len(coords) == 2:
-                elon, elat = coords
-                if lat_min <= elat <= lat_max and lon_min <= elon <= lon_max:
-                    filtered.append(e)
-
-    return filtered
+def fetch_events(start, end, lat=LAT, lon=LON, radius=RADIUS, limit=200):
+    """Special events (venue-based) near location. Post-filters by bbox."""
+    lat_min, lat_max, lon_min, lon_max = build_bbox(lat, lon, radius)
+    raw = soda_get(EVENTS, {"$where": f"date >= {q(start)} AND date <= {q(end)}", "$order": "date ASC", "$limit": str(limit)}, "events")
+    return [e for e in raw
+            if isinstance(e.get("location"), dict)
+            and len(e["location"].get("coordinates", [])) == 2
+            and lat_min <= e["location"]["coordinates"][1] <= lat_max
+            and lon_min <= e["location"]["coordinates"][0] <= lon_max]
 
 
-def _soda_get(url: str, label: str = "data") -> list[dict]:
-    """Make a SODA API GET request and return parsed JSON."""
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "ChicagoNeighborhoodEvents/1.0"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if isinstance(data, dict) and data.get("error"):
-                print(f"⚠️  API error fetching {label}: {data.get('message', 'unknown')}", file=sys.stderr)
-                return []
-            return data if isinstance(data, list) else []
-    except urllib.error.HTTPError as e:
-        print(f"⚠️  HTTP {e.code} fetching {label}: {e.reason}", file=sys.stderr)
-        return []
-    except Exception as e:
-        print(f"⚠️  Error fetching {label}: {e}", file=sys.stderr)
-        return []
+# ── Normalizers ────────────────────────────────────────────────────
+
+PERMIT_CATS = {
+    "Festival": "festival", "Parade": "festival", "Athletic": "athletic",
+    "StClosure": "street_closure", "Filming": "filming", "BlockParty": "block_party",
+    "Assembly": "community", "Peoples": "community", "FarmMkt": "commercial",
+    "SideSale": "commercial", "PublicPlac": "commercial",
+}
 
 
-def normalize_permit(p: dict) -> dict:
-    """Convert a raw permit record into a clean, normalized event dict."""
-    start = p.get("applicationstartdate", "")[:10] if p.get("applicationstartdate") else ""
-    end = p.get("applicationenddate", "")[:10] if p.get("applicationenddate") else ""
-
-    address_parts = [
-        p.get("streetnumberfrom", ""),
-        p.get("direction", ""),
-        p.get("streetname", ""),
-        p.get("suffix", ""),
-    ]
-    address = " ".join(part for part in address_parts if part).strip()
-
+def normalize_permit(p):
+    wt, at = p.get("worktype", ""), p.get("applicationtype", "")
+    category = PERMIT_CATS.get(wt) or ("festival" if at == "DOT_SE" else "construction")
+    addr = " ".join(filter(None, [p.get("streetnumberfrom"), p.get("direction"), p.get("streetname"), p.get("suffix")]))
     comments = p.get("comments", "") or ""
-
-    # Determine icon/color category
-    wt = p.get("worktype", "")
-    at = p.get("applicationtype", "")
-
-    if wt == "Festival" or wt == "Parade":
-        category = "festival"
-    elif wt == "Athletic":
-        category = "athletic"
-    elif wt in ("StClosure",):
-        category = "street_closure"
-    elif wt == "Filming":
-        category = "filming"
-    elif wt == "BlockParty":
-        category = "block_party"
-    elif wt in ("Assembly", "Peoples"):
-        category = "community"
-    elif wt in ("FarmMkt", "SideSale", "PublicPlac"):
-        category = "commercial"
-    elif at == "DOT_SE":
-        category = "festival"  # General special event
-    else:
-        category = "construction"
-
     return {
-        "id": p.get("uniquekey", ""),
-        "source": "transport_permit",
-        "title": p.get("applicationname", "") or comments[:60] or address,
+        "id": p.get("uniquekey", ""), "source": "transport_permit",
+        "title": p.get("applicationname", "") or comments[:60] or addr,
         "description": comments or p.get("worktypedescription", ""),
         "category": category,
-        "date_start": start,
-        "date_end": end,
-        "address": address,
-        "closure_type": p.get("streetclosure", ""),
-        "ward": "",
-        "lat": float(p.get("latitude", 0)),
-        "lon": float(p.get("longitude", 0)),
-        "permit_type": p.get("applicationdescription", ""),
-        "work_type": p.get("worktypedescription", ""),
+        "date_start": (p.get("applicationstartdate") or "")[:10],
+        "date_end": (p.get("applicationenddate") or "")[:10],
+        "address": addr, "closure_type": p.get("streetclosure", ""), "ward": "",
+        "lat": float(p.get("latitude", 0)), "lon": float(p.get("longitude", 0)),
+        "permit_type": p.get("applicationdescription", ""), "work_type": p.get("worktypedescription", ""),
         "status": p.get("applicationstatus", ""),
     }
 
 
-def normalize_event(e: dict) -> dict:
-    """Convert a raw Special Events record into a clean event dict."""
-    loc = e.get("location", {})
-    coords = loc.get("coordinates", [0, 0]) if isinstance(loc, dict) else [0, 0]
-    if coords and len(coords) == 2:
-        lon, lat = coords
-    else:
-        lat, lon = 0, 0
-
+def normalize_event(e):
+    loc = e.get("location") or {}
+    coords = loc.get("coordinates") if isinstance(loc, dict) else [0, 0]
+    lat, lon = float(coords[1]) if len(coords) == 2 else 0, float(coords[0]) if len(coords) == 2 else 0
+    et = e.get("event_type", "")
     return {
-        "id": e.get(":id", "") or f"evt_{hash(e.get('event_details',''))}",
-        "source": "special_event",
-        "title": e.get("event_details", ""),
-        "description": f"{e.get('event_type', '')} at {e.get('venue', '')}",
-        "category": (e.get("event_type", "") or "").lower().replace(" ", "_"),
-        "date_start": (e.get("date") or "")[:10] if e.get("date") else "",
-        "date_end": (e.get("date") or "")[:10] if e.get("date") else "",
+        "id": e.get(":id", "") or f"evt_{hash(str(e.get('event_details','')))}",
+        "source": "special_event", "title": e.get("event_details", ""),
+        "description": f"{et} at {e.get('venue', '')}",
+        "category": (et or "").lower().replace(" ", "_"),
+        "date_start": (e.get("date") or "")[:10],
+        "date_end": (e.get("date") or "")[:10],
         "address": e.get("venue_address", ""),
-        "closure_type": "Full" if e.get("event_type") in ("Parade", "Festival", "Marathon") else "Partial",
-        "ward": e.get("ward", ""),
-        "lat": float(lat),
-        "lon": float(lon),
-        "permit_type": "Special Event",
-        "work_type": e.get("event_type", ""),
-        "status": "Scheduled",
+        "closure_type": "Full" if et in ("Parade", "Festival", "Marathon") else "Partial",
+        "ward": e.get("ward", ""), "lat": lat, "lon": lon,
+        "permit_type": "Special Event", "work_type": et, "status": "Scheduled",
     }
 
 
-def fetch_all(
-    start_date: str | None = None,
-    end_date: str | None = None,
-    lat: float = DEFAULT_LAT,
-    lon: float = DEFAULT_LON,
-    radius_miles: float = DEFAULT_RADIUS_MILES,
-    limit: int = 500,
-) -> dict:
-    """
-    Fetch and merge all events + permits into a single result.
-    Returns dict with keys: events (merged list), metadata.
-    """
+def fetch_all(start_date=None, end_date=None, lat=LAT, lon=LON, radius=RADIUS, limit=500):
+    """Merge permits + events, sorted by date."""
     if not start_date:
         start_date = date.today().isoformat()
     if not end_date:
-        end_date = (date.today() + timedelta(days=DEFAULT_DAYS)).isoformat()
-
-    permits = fetch_permits(start_date, end_date, lat, lon, radius_miles, limit=limit)
-    specials = fetch_special_events(start_date, end_date, lat, lon, radius_miles, limit=limit)
-
-    normalized = [normalize_permit(p) for p in permits]
-    normalized += [normalize_event(e) for e in specials]
-
-    # Sort by start date
-    normalized.sort(key=lambda x: x["date_start"] or "9999-12-31")
-
+        end_date = (date.today() + timedelta(days=DAYS)).isoformat()
+    events = [normalize_permit(p) for p in fetch_permits(start_date, end_date, lat, lon, radius, limit)]
+    events += [normalize_event(e) for e in fetch_events(start_date, end_date, lat, lon, radius, limit)]
+    events.sort(key=lambda x: x["date_start"] or "9999-12-31")
     return {
         "metadata": {
             "generated_at": datetime.now().isoformat(),
-            "location": {"lat": lat, "lon": lon, "radius_miles": radius_miles},
+            "location": {"lat": lat, "lon": lon, "radius_miles": radius},
             "date_range": {"start": start_date, "end": end_date},
-            "total_events": len(normalized),
-            "sources": {
-                "transport_permits": f"https://data.cityofchicago.org/d/{PERMITS_ID}",
-                "special_events": f"https://data.cityofchicago.org/d/{EVENTS_ID}",
-            },
+            "total_events": len(events),
+            "sources": {"transport_permits": f"https://data.cityofchicago.org/d/{PERMITS}", "special_events": f"https://data.cityofchicago.org/d/{EVENTS}"},
         },
-        "events": normalized,
+        "events": events,
     }
 
 
-# ── CLI ───────────────────────────────────────────────────────────────
+# ── CLI ───────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Fetch Chicago neighborhood events and street closures.",
-    )
-    parser.add_argument("--lat", type=float, default=DEFAULT_LAT,
-                        help=f"Latitude (default: {DEFAULT_LAT})")
-    parser.add_argument("--lon", type=float, default=DEFAULT_LON,
-                        help=f"Longitude (default: {DEFAULT_LON})")
-    parser.add_argument("--radius", type=float, default=DEFAULT_RADIUS_MILES,
-                        help=f"Search radius in miles (default: {DEFAULT_RADIUS_MILES})")
-    parser.add_argument("--start", type=str, default=None,
-                        help="Start date YYYY-MM-DD (default: today)")
-    parser.add_argument("--end", type=str, default=None,
-                        help="End date YYYY-MM-DD (default: today + 14 days)")
-    parser.add_argument("--days", type=int, default=None,
-                        help="Number of days from today (overrides --end)")
-    parser.add_argument("--output", "-o", type=str, default=None,
-                        help="Write JSON to file instead of stdout")
-    parser.add_argument("--pretty", "-p", action="store_true",
-                        help="Pretty-print JSON output")
-    parser.add_argument("--limit", type=int, default=500,
-                        help="Max records to fetch (default: 500)")
+    p = argparse.ArgumentParser(description="Fetch Chicago neighborhood events.")
+    defaults = [(LAT, "lat", "Latitude"), (LON, "lon", "Longitude"),
+                (RADIUS, "radius", "Search radius (miles)")]
+    for d, flag, h in defaults:
+        p.add_argument(f"--{flag}", type=float, default=d, help=f"{h} (default: {d})")
+    p.add_argument("--start", help="Start date YYYY-MM-DD (default: today)")
+    p.add_argument("--end", help="End date YYYY-MM-DD (default: today+14)")
+    p.add_argument("--days", type=int, help="Override --end: N days from today")
+    p.add_argument("-o", "--output", help="Write JSON to file")
+    p.add_argument("-p", "--pretty", action="store_true", help="Pretty-print")
+    p.add_argument("--limit", type=int, default=500, help="Max records (default: 500)")
+    args = p.parse_args()
 
-    args = parser.parse_args()
-
+    end = args.end
     if args.days:
-        end_date = (date.today() + timedelta(days=args.days)).isoformat()
-    else:
-        end_date = args.end
+        end = (date.today() + timedelta(days=args.days)).isoformat()
 
-    result = fetch_all(
-        start_date=args.start,
-        end_date=end_date,
-        lat=args.lat,
-        lon=args.lon,
-        radius_miles=args.radius,
-        limit=args.limit,
-    )
+    result = fetch_all(start_date=args.start, end_date=end,
+                       lat=args.lat, lon=args.lon, radius=args.radius, limit=args.limit)
 
-    indent = 2 if args.pretty else None
-    output = json.dumps(result, indent=indent, default=str)
-
+    out = json.dumps(result, indent=2 if args.pretty else None, default=str)
     if args.output:
         with open(args.output, "w") as f:
-            f.write(output)
-        print(f"✅ Wrote {result['metadata']['total_events']} events to {args.output}", file=sys.stderr)
+            f.write(out)
+        print(f"Wrote {result['metadata']['total_events']} events to {args.output}", file=sys.stderr)
     else:
-        print(output)
+        print(out)
 
 
 if __name__ == "__main__":

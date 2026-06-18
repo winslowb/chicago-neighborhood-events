@@ -241,27 +241,11 @@ const CONFIG = {
   sodaBase: "https://data.cityofchicago.org/resource",
 };
 
-// Category color mapping
+// ponytail: only 8 base categories; fallback `||` in getColor handles the rest
 const COLORS = {
-  festival:     "#e67e22",   // orange
-  athletic:     "#2ecc71",   // green
-  street_closure: "#e74c3c", // red
-  filming:      "#9b59b6",   // purple
-  block_party:  "#e84393",   // pink
-  community:    "#1abc9c",   // teal
-  commercial:   "#3498db",   // blue
-  construction: "#f1c40f",   // yellow
-  parade:       "#e67e22",   // orange (same as festival)
-  concert:      "#e67e22",
-  conference:   "#3498db",
-  exhibition:   "#3498db",
-  basketball_game: "#2ecc71",
-  soccer_game:     "#2ecc71",
-  football_game:   "#2ecc71",
-  hockey_game:     "#2ecc71",
-  assembly:    "#1abc9c",
-  special_event: "#e67e22",
-  filming:     "#9b59b6",
+  festival: "#e67e22", athletic: "#2ecc71", street_closure: "#e74c3c",
+  filming: "#9b59b6", block_party: "#e84393", community: "#1abc9c",
+  commercial: "#3498db", construction: "#f1c40f",
 };
 
 const CATEGORY_LABELS = {
@@ -312,28 +296,18 @@ function init() {
     dashArray: "5, 10",
   }).addTo(map);
 
-  // Event handlers
+  // Button presets — one helper
+  const setDays = (n) => {
+    const t = new Date();
+    document.getElementById("dateFrom").value = fmtDate(t);
+    const e = new Date(t); e.setDate(e.getDate() + n);
+    document.getElementById("dateTo").value = fmtDate(e);
+    fetchData();
+  };
+  document.getElementById("btnToday").addEventListener("click", () => setDays(0));
+  document.getElementById("btnWeek").addEventListener("click", () => setDays(7));
+  document.getElementById("btnMonth").addEventListener("click", () => setDays(30));
   document.getElementById("btnGo").addEventListener("click", fetchData);
-  document.getElementById("btnToday").addEventListener("click", () => {
-    const t = new Date();
-    document.getElementById("dateFrom").value = fmtDate(t);
-    document.getElementById("dateTo").value = fmtDate(t);
-    fetchData();
-  });
-  document.getElementById("btnWeek").addEventListener("click", () => {
-    const t = new Date();
-    document.getElementById("dateFrom").value = fmtDate(t);
-    const w = new Date(t); w.setDate(w.getDate() + 7);
-    document.getElementById("dateTo").value = fmtDate(w);
-    fetchData();
-  });
-  document.getElementById("btnMonth").addEventListener("click", () => {
-    const t = new Date();
-    document.getElementById("dateFrom").value = fmtDate(t);
-    const m = new Date(t); m.setDate(m.getDate() + 30);
-    document.getElementById("dateTo").value = fmtDate(m);
-    fetchData();
-  });
 
   // Auto-refresh every 5 minutes
   setInterval(() => {
@@ -675,9 +649,7 @@ function hideLoading() {
 }
 
 function escHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s || "";
-  return div.innerHTML;
+  return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 
 // ── Start ──────────────────────────────────────────────────────────
