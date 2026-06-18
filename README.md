@@ -175,3 +175,36 @@ Built with [Leaflet.js](https://leafletjs.com/) and [OpenStreetMap](https://www.
 ## 📄 License
 
 MIT — use freely. Data is public domain from the City of Chicago.
+
+---
+
+## 🚀 Deployment to pihole.lan
+
+### Prerequisites
+- SSH access to `pihole.lan` (password `g` via sshpass)
+- The `getit-homepage` nginx container must be running
+
+### Quick deploy
+```bash
+./deploy.sh
+```
+
+This copies `index.html` to `/home/bill/.docker/getit/html/neighborhood/` on pihole.lan, which is bind-mounted into the `getit-homepage` nginx container at `/usr/share/nginx/html/neighborhood/`.
+
+The page is then served at **http://getit.lan/neighborhood/**
+
+### Updating the getit.lan homepage
+The homepage at `getit.lan` (`/home/bill/.docker/getit/html/index.html`) has a card for this service. Edit that file to update the card's icon, description, or URL.
+
+### Infrastructure
+| Component | Detail |
+|-----------|--------|
+| Host | pihole.lan (192.168.0.19) |
+| Container | `getit-homepage` (nginx:alpine) |
+| Port | 127.0.0.1:3004 |
+| Proxy | Caddy at `/etc/caddy/Caddyfile` → `localhost:3004` |
+| Bind mount | `/home/bill/.docker/getit/html` → `/usr/share/nginx/html` (read-only) |
+| URL | http://getit.lan/neighborhood/ |
+
+### Updating npm deps (if any)
+This is a static HTML/JS page — no build step, no npm dependencies.
