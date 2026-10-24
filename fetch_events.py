@@ -134,8 +134,13 @@ def normalize_permit(p):
 
 def normalize_event(e):
     loc = e.get("location") or {}
-    coords = loc.get("coordinates") if isinstance(loc, dict) else [0, 0]
-    lat, lon = float(coords[1]) if len(coords) == 2 else 0, float(coords[0]) if len(coords) == 2 else 0
+    coords = loc.get("coordinates") if isinstance(loc, dict) else None
+    lat, lon = 0.0, 0.0
+    if isinstance(coords, list) and len(coords) == 2:
+        try:
+            lat, lon = float(coords[1]), float(coords[0])
+        except (TypeError, ValueError):
+            lat, lon = 0.0, 0.0
     et = e.get("event_type", "")
     return {
         "id": e.get(":id", "") or f"evt_{hash(str(e.get('event_details','')))}",

@@ -1,11 +1,14 @@
 # ─── CI/CD Pipeline for Chicago Neighborhood Events ──────────────────
 #
 # Trigger: push to main
-# Jobs:    build → deploy
+# Jobs:    test → build → deploy
 #
 # Deployment uses a GitHub self-hosted runner installed on pihole.lan with
 # labels: self-hosted, pihole, neighborhood. The runner has direct Docker
 # access and can manage the compose stack locally.
+#
+# The `test` job (pytest, offline against fetch_events.py pure logic) gates
+# the build/deploy — CI must prove both deploy AND logic.
 #
 # Image registry:
 #   ghcr.io/winslowb/chicago-neighborhood-events:*  (git sha + latest)
@@ -25,14 +28,32 @@ env:
   HOST_PORT: 3008
 
 jobs:
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run test suite
+        run: pytest tests/ -v
+
   build:
     name: Build & Push Image
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up QEMU for multi-arch builds
         uses: docker/setup-qemu-action@v3
@@ -79,7 +100,7 @@ jobs:
       GHCR_USERNAME: ${{ github.actor }}
       GHCR_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Deploy with docker compose
         shell: bash
